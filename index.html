@@ -2,77 +2,471 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>即時影像</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票到價通知小幫手</title>
+    <!-- 引入 Tailwind CSS 進行美化 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Phosphor Icons 圖示 -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            background-color: #f5f5f5;
-            margin: 0;
-            padding: 20px;
+        /* 針對通知彈窗的簡單動畫 */
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
         }
-
-        .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
+        .toast-enter {
+            animation: slideInRight 0.3s ease-out forwards;
         }
-
-        .cam-box {
-            background: white;
-            padding: 10px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        
+        /* 價格跳動時的短暫高亮動畫 */
+        @keyframes flashGreen {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(34, 197, 94, 0.2); }
+            100% { background-color: transparent; }
         }
-
-        iframe {
-            width: 480px;
-            height: 320px;
-            border: none;
-            border-radius: 10px;
-            display: block; /* 讓影像作為區塊顯示，避免多餘空白 */
+        @keyframes flashRed {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(239, 68, 68, 0.2); }
+            100% { background-color: transparent; }
         }
-
-        button {
-            margin-top: 10px;
-            padding: 8px 16px;
-            font-size: 16px;
-            border: none;
-            border-radius: 6px;
-            background-color: #0078D7;
-            color: white;
-            cursor: pointer;
-            width: 100%; /* 讓按鈕寬度自動對齊影像寬度，視覺更整齊 */
-        }
-
-        button:hover {
-            background-color: #005fa3;
-        }
+        .flash-up { animation: flashRed 1s ease-out; } /* 台股紅色上漲 */
+        .flash-down { animation: flashGreen 1s ease-out; } /* 台股綠色下跌 */
     </style>
 </head>
-<body>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen relative">
 
-    <div class="container">
+    <!-- 用於放置通知的容器 -->
+    <div id="toast-container" class="fixed top-4 left-4 right-4 md:left-auto md:right-5 md:top-5 z-50 flex flex-col gap-3 pointer-events-none"></div>
+
+    <div class="max-w-4xl mx-auto px-4 py-8 md:py-12">
         
-        <div class="cam-box">
-            <iframe id="cam1" src="https://www.twipcam.com/cam/nwt-000020"></iframe>
-            <button onclick="reloadCam('cam1')">撥放</button>
-        </div>
+        <!-- 標題區塊 -->
+        <header class="text-center mb-10 relative">
+            <!-- 雲端同步狀態標籤 -->
+            <div id="syncStatus" class="absolute top-0 right-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 text-slate-600 rounded-full text-xs font-medium transition-colors">
+                <i class="ph ph-spinner animate-spin"></i> 連線中...
+            </div>
 
-        <div class="cam-box">
-            <iframe id="cam2" src="https://www.twipcam.com/cam/tao-000150"></iframe>
-            <button onclick="reloadCam('cam2')">撥放</button>
+            <div class="inline-flex items-center justify-center p-3 bg-blue-100 rounded-full mb-4 mt-6 md:mt-0">
+                <i class="ph ph-chart-line-up text-3xl text-blue-600"></i>
+            </div>
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">股票到價通知小幫手</h1>
+            <p class="mt-2 text-slate-500">設定目標價，系統將模擬股價變動並在達標時通知您</p>
+        </header>
+
+        <!-- 主要內容卡片 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            
+            <!-- 輸入區塊 -->
+            <div class="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
+                <div class="flex flex-col md:flex-row gap-4">
+                    <div class="flex-1 relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="ph ph-magnifying-glass text-slate-400 text-lg"></i>
+                        </div>
+                        <input type="text" id="stockSymbol" 
+                            class="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow outline-none placeholder:text-slate-400" 
+                            placeholder="輸入股票代號或名稱 (如: 2330 或 台積電)" required>
+                    </div>
+                    
+                    <div class="flex-1 relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="ph ph-currency-circle-dollar text-slate-400 text-lg"></i>
+                        </div>
+                        <input type="number" id="targetPrice" step="0.5" 
+                            class="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow outline-none placeholder:text-slate-400" 
+                            placeholder="設定目標價位" required>
+                    </div>
+                    
+                    <button id="addBtn" onclick="window.addStock()" disabled
+                        class="md:w-auto w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm shadow-blue-600/20 active:scale-[0.98]">
+                        <i class="ph ph-plus-circle text-lg"></i>
+                        加入追蹤
+                    </button>
+                </div>
+            </div>
+
+            <!-- 列表區塊 -->
+            <div class="p-4 md:p-0 bg-slate-50/30 md:bg-transparent">
+                <table class="w-full text-left border-collapse block md:table">
+                    <thead class="hidden md:table-header-group">
+                        <tr class="bg-slate-50 text-slate-500 text-sm uppercase tracking-wider border-b border-slate-200">
+                            <th class="px-6 py-4 font-medium">股票代號 / 名稱</th>
+                            <th class="px-6 py-4 font-medium text-right">目標價</th>
+                            <th class="px-6 py-4 font-medium text-right">目前價位</th>
+                            <th class="px-6 py-4 font-medium text-center">狀態</th>
+                            <th class="px-6 py-4 font-medium text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stockList" class="block md:table-row-group flex flex-col gap-4 md:gap-0 md:divide-y divide-slate-100">
+                        <!-- 載入中狀態 -->
+                        <tr id="loadingState" class="block md:table-row bg-white md:bg-transparent rounded-xl border border-slate-200 md:border-none shadow-sm md:shadow-none">
+                            <td colspan="5" class="block md:table-cell px-6 py-12 text-center text-slate-400">
+                                <div class="flex flex-col items-center gap-2">
+                                    <i class="ph ph-spinner animate-spin text-4xl text-blue-400"></i>
+                                    <p>正在同步雲端資料...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 狀態說明 -->
+        <div class="mt-6 flex flex-wrap items-center justify-center gap-4 md:gap-6 text-sm text-slate-500">
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-red-500"></span> 上漲 (台股習慣)
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-green-500"></span> 下跌
+            </div>
+            <div class="flex items-center gap-2">
+                <i class="ph-fill ph-bell-ringing text-amber-500"></i> 達到目標價
+            </div>
         </div>
 
     </div>
 
-    <script>
-        function reloadCam(camId) {
-            var iframe = document.getElementById(camId);
-            iframe.src = iframe.src;
-        }
-    </script>
+    <!-- Firebase 與 核心邏輯 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // 初始化 Firebase
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // 狀態管理
+        let currentUser = null;
+        let unsubscribeSnapshot = null;
+        let watchList = [];       // 從雲端抓取的資料 (包含 symbol, targetPrice)
+        let localStockData = {};  // 本地揮發性資料 (模擬的 currentPrice, previousPrice, 通知狀態)
+
+        // 顯示通知訊息 (自訂 Toast)
+        window.showNotification = function(title, message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let iconClass, borderClass, textClass;
+            if (type === 'success') {
+                iconClass = 'ph-fill ph-bell-ringing text-amber-500';
+                borderClass = 'border-amber-500';
+                textClass = 'text-amber-500';
+            } else if (type === 'error') {
+                iconClass = 'ph-fill ph-warning-circle text-red-500';
+                borderClass = 'border-red-500';
+                textClass = 'text-red-500';
+            } else {
+                iconClass = 'ph-fill ph-info text-blue-500';
+                borderClass = 'border-blue-500';
+                textClass = 'text-blue-500';
+            }
+
+            toast.className = `toast-enter bg-white border-l-4 ${borderClass} p-4 rounded-xl shadow-xl shadow-slate-200/50 flex items-start gap-3 w-full md:min-w-[300px] md:max-w-sm pointer-events-auto`;
+            
+            toast.innerHTML = `
+                <div class="${textClass} mt-0.5">
+                    <i class="${iconClass} text-xl"></i>
+                </div>
+                <div class="flex-1">
+                    <h4 class="text-sm font-bold text-slate-800">${title}</h4>
+                    <p class="text-sm text-slate-600 mt-1">${message}</p>
+                </div>
+                <button class="text-slate-400 hover:text-slate-600 transition-colors" onclick="this.parentElement.remove()">
+                    <i class="ph ph-x text-lg"></i>
+                </button>
+            `;
+
+            container.appendChild(toast);
+            setTimeout(() => {
+                if(toast.parentElement) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateX(100%)';
+                    toast.style.transition = 'all 0.3s ease-out';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 5000);
+        };
+
+        // 驗證登入
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication failed:", error);
+                window.showNotification("系統錯誤", "無法連線至帳號系統，請重新整理頁面。", "error");
+            }
+        };
+
+        // 監聽登入狀態
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            const statusEl = document.getElementById('syncStatus');
+            const addBtn = document.getElementById('addBtn');
+
+            if (user) {
+                // UI 更新為已連線
+                statusEl.className = 'absolute top-0 right-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium';
+                statusEl.innerHTML = `<i class="ph-fill ph-cloud-check"></i> 已啟用雲端同步`;
+                addBtn.disabled = false;
+                
+                // 啟動資料庫監聽
+                setupFirestoreListener(user.uid);
+            } else {
+                statusEl.className = 'absolute top-0 right-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-xs font-medium';
+                statusEl.innerHTML = `<i class="ph-fill ph-cloud-slash"></i> 離線模式`;
+                addBtn.disabled = true;
+                
+                if (unsubscribeSnapshot) unsubscribeSnapshot();
+                watchList = [];
+                renderTable();
+            }
+        });
+
+        initAuth();
+
+        // 建立雲端資料庫監聽
+        function setupFirestoreListener(userId) {
+            const watchListRef = collection(db, 'artifacts', appId, 'users', userId, 'watchlist');
+            
+            unsubscribeSnapshot = onSnapshot(watchListRef, (snapshot) => {
+                watchList = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    watchList.push(data);
+                    
+                    // 若這檔股票是剛從雲端載入且沒有本地模擬價格，則初始化一組模擬資料
+                    if (!localStockData[data.symbol]) {
+                        const mockInitialPrice = +(data.targetPrice * (0.9 + Math.random() * 0.2)).toFixed(2);
+                        localStockData[data.symbol] = {
+                            currentPrice: mockInitialPrice,
+                            previousPrice: mockInitialPrice,
+                            notified: false
+                        };
+                    }
+                });
+                renderTable();
+            }, (error) => {
+                console.error("Error fetching watchlist:", error);
+                window.showNotification("讀取失敗", "無法同步雲端資料，請檢查網路連線。", "error");
+            });
+        }
+
+        // 1. 新增股票到雲端清單
+        window.addStock = async function() {
+            if (!currentUser) {
+                window.showNotification("錯誤", "系統連線中，請稍候再試。", "error");
+                return;
+            }
+
+            const symbolInput = document.getElementById('stockSymbol');
+            const targetInput = document.getElementById('targetPrice');
+            
+            const symbol = symbolInput.value.trim().toUpperCase();
+            const targetPrice = parseFloat(targetInput.value);
+
+            if (!symbol || isNaN(targetPrice) || targetPrice <= 0) {
+                window.showNotification("輸入錯誤", "請輸入正確的股票代號或名稱，與大於 0 的目標價位！", "error");
+                return;
+            }
+
+            if (watchList.some(stock => stock.symbol === symbol)) {
+                window.showNotification("重複加入", "這檔股票已經在您的雲端追蹤清單中了！", "info");
+                return;
+            }
+
+            // 寫入 Firestore
+            const stockData = {
+                symbol: symbol,
+                targetPrice: targetPrice,
+                addedAt: new Date().toISOString()
+            };
+
+            try {
+                // 鎖定按鈕避免重複提交
+                document.getElementById('addBtn').disabled = true;
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'watchlist', symbol);
+                await setDoc(docRef, stockData);
+                
+                // 清空輸入並保持焦點
+                symbolInput.value = '';
+                targetInput.value = '';
+                symbolInput.focus();
+            } catch (error) {
+                console.error("Error adding document: ", error);
+                window.showNotification("儲存失敗", "無法加入清單，請稍後重試。", "error");
+            } finally {
+                document.getElementById('addBtn').disabled = false;
+            }
+        };
+
+        // 2. 刪除股票
+        window.removeStock = async function(symbol) {
+            if (!currentUser) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'watchlist', symbol);
+                await deleteDoc(docRef);
+                // 刪除本地模擬狀態
+                delete localStockData[symbol];
+            } catch (error) {
+                console.error("Error removing document: ", error);
+                window.showNotification("刪除失敗", "無法移除該項目，請稍後重試。", "error");
+            }
+        };
+
+        // 3. 渲染表格
+        function renderTable() {
+            const tbody = document.getElementById('stockList');
+            
+            // 處理空狀態
+            if (watchList.length === 0) {
+                tbody.innerHTML = `
+                    <tr id="emptyState" class="block md:table-row bg-white md:bg-transparent rounded-xl border border-slate-200 md:border-none shadow-sm md:shadow-none">
+                        <td colspan="5" class="block md:table-cell px-6 py-12 text-center text-slate-400">
+                            <div class="flex flex-col items-center gap-2">
+                                <i class="ph ph-cloud-arrow-up text-4xl text-slate-300"></i>
+                                <p>雲端清單目前是空的，請在上方新增！</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = '';
+
+            // 將雲端資料 (watchList) 結合 本地模擬資料 (localStockData) 進行渲染
+            watchList.forEach(stockCloud => {
+                const symbol = stockCloud.symbol;
+                const targetPrice = stockCloud.targetPrice;
+                const localData = localStockData[symbol];
+
+                // 防呆：萬一本地資料還沒準備好就略過
+                if (!localData) return;
+
+                const tr = document.createElement('tr');
+                tr.id = `row-${symbol}`;
+                tr.className = 'block md:table-row bg-white md:bg-transparent border border-slate-200 md:border-none rounded-xl md:rounded-none shadow-sm md:shadow-none hover:bg-slate-50/80 transition-colors group overflow-hidden relative';
+                
+                const isReached = localData.currentPrice >= targetPrice;
+                
+                // 判斷漲跌顏色 (台股：紅漲綠跌)
+                let priceColorClass = 'text-slate-600';
+                let arrowIcon = '';
+                if (localData.currentPrice > localData.previousPrice) {
+                    priceColorClass = 'text-red-500 font-medium';
+                    arrowIcon = '<i class="ph-bold ph-caret-up text-xs mr-1"></i>';
+                } else if (localData.currentPrice < localData.previousPrice) {
+                    priceColorClass = 'text-green-500 font-medium';
+                    arrowIcon = '<i class="ph-bold ph-caret-down text-xs mr-1"></i>';
+                }
+
+                const statusBadge = isReached 
+                    ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                        <i class="ph-fill ph-bell-ringing"></i> 已達標
+                       </span>`
+                    : `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 md:border-transparent">
+                        <i class="ph ph-eyes"></i> 追蹤中
+                       </span>`;
+
+                tr.innerHTML = `
+                    <td class="flex md:table-cell justify-between items-center px-4 md:px-6 py-3 md:py-4 font-bold text-slate-800 border-b border-slate-100 md:border-none bg-slate-50 md:bg-transparent">
+                        <span class="md:hidden text-slate-500 font-normal text-sm">代號 / 名稱</span>
+                        <span class="text-lg md:text-base">${symbol}</span>
+                    </td>
+                    <td class="flex md:table-cell justify-between items-center px-4 md:px-6 py-3 md:py-4 text-right text-slate-600 border-b border-slate-100 md:border-none">
+                        <span class="md:hidden text-slate-500 font-normal text-sm">目標價</span>
+                        <span>${targetPrice.toFixed(2)}</span>
+                    </td>
+                    <td class="flex md:table-cell justify-between items-center px-4 md:px-6 py-3 md:py-4 text-right ${priceColorClass} border-b border-slate-100 md:border-none" id="price-${symbol}">
+                        <span class="md:hidden text-slate-500 font-normal text-sm">目前價位</span>
+                        <div class="flex items-center justify-end text-lg md:text-base">
+                            ${arrowIcon}
+                            ${localData.currentPrice.toFixed(2)}
+                        </div>
+                    </td>
+                    <td class="flex md:table-cell justify-between items-center px-4 md:px-6 py-3 md:py-4 text-center border-b border-slate-100 md:border-none">
+                        <span class="md:hidden text-slate-500 font-normal text-sm">狀態</span>
+                        ${statusBadge}
+                    </td>
+                    <td class="flex md:table-cell justify-between md:justify-center items-center px-4 md:px-6 py-3 md:py-4 text-center bg-slate-50/50 md:bg-transparent">
+                        <span class="md:hidden text-slate-500 font-normal text-sm">操作</span>
+                        <button onclick="window.removeStock('${symbol}')" 
+                            class="p-2 md:p-2 px-4 py-1.5 md:px-2 md:py-2 text-slate-500 md:text-slate-400 hover:text-red-500 hover:bg-red-100 md:hover:bg-red-50 bg-white md:bg-transparent border border-slate-200 md:border-transparent rounded-lg transition-colors flex items-center gap-1.5" title="刪除">
+                            <i class="ph ph-trash text-lg md:text-lg"></i>
+                            <span class="md:hidden text-sm font-medium">刪除</span>
+                        </button>
+                    </td>
+                `;
+                
+                if (isReached) {
+                    tr.classList.add('md:bg-amber-50/30', 'border-amber-200');
+                }
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 4. 模擬目前價位更新與到價通知
+        setInterval(() => {
+            if (watchList.length === 0) return;
+
+            let needsRender = false;
+
+            watchList.forEach(stockCloud => {
+                const symbol = stockCloud.symbol;
+                const targetPrice = stockCloud.targetPrice;
+                const localData = localStockData[symbol];
+                
+                if (!localData) return;
+
+                // 模擬股價波動 (只有 30% 機率變動)
+                if (Math.random() > 0.7) {
+                    localData.previousPrice = localData.currentPrice;
+                    const changePercent = 1 + ((Math.random() - 0.5) * 0.03);
+                    localData.currentPrice = +(localData.currentPrice * changePercent).toFixed(2);
+                    needsRender = true;
+
+                    // 閃爍動畫
+                    const rowElement = document.getElementById(`row-${symbol}`);
+                    if(rowElement) {
+                        const priceCell = document.getElementById(`price-${symbol}`);
+                        if(localData.currentPrice > localData.previousPrice) {
+                            priceCell.classList.remove('flash-up', 'flash-down');
+                            void priceCell.offsetWidth; 
+                            priceCell.classList.add('flash-up');
+                        } else if (localData.currentPrice < localData.previousPrice) {
+                            priceCell.classList.remove('flash-up', 'flash-down');
+                            void priceCell.offsetWidth; 
+                            priceCell.classList.add('flash-down');
+                        }
+                    }
+
+                    // 檢查是否到價
+                    if (localData.currentPrice >= targetPrice && !localData.notified) {
+                        window.showNotification("到價通知", `<span class="font-bold">${symbol}</span> 已達目標價 ${targetPrice}！目前：<span class="text-red-500 font-bold">${localData.currentPrice.toFixed(2)}</span>`, "success");
+                        localData.notified = true;
+                    } 
+                    else if (localData.currentPrice < targetPrice && localData.notified) {
+                        localData.notified = false;
+                    }
+                }
+            });
+
+            if (needsRender) {
+                renderTable();
+            }
+
+        }, 2000); 
+    </script>
 </body>
 </html>
