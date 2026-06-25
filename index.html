@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>即時影像</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .cam-box {
+            background: white;
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+
+        iframe {
+            width: 480px;
+            height: 320px;
+            border: none;
+            border-radius: 10px;
+            display: block; /* 讓影像作為區塊顯示，避免多餘空白 */
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            background-color: #0078D7;
+            color: white;
+            cursor: pointer;
+            width: 100%; /* 讓按鈕寬度自動對齊影像寬度，視覺更整齊 */
+        }
+
+        button:hover {
+            background-color: #005fa3;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        
+        <div class="cam-box">
+            <iframe id="cam1" src="https://www.twipcam.com/cam/nwt-000020"></iframe>
+            <button onclick="reloadCam('cam1')">撥放</button>
+        </div>
+
+        <div class="cam-box">
+            <iframe id="cam2" src="https://www.twipcam.com/cam/tao-000150"></iframe>
+            <button onclick="reloadCam('cam2')">撥放</button>
+        </div>
+
+    </div>
+
+    <script>
+        function reloadCam(camId) {
+            var iframe = document.getElementById(camId);
+            iframe.src = iframe.src;
+        }
+    </script>
+
+</body>
+</html>
